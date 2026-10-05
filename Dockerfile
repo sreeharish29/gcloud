@@ -1,9 +1,24 @@
-FROM ghcr.io/idiap/coqui-tts-cpu
-ENTRYPOINT []
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-RUN uv pip install --python /opt/venv/bin/python --no-cache \
-    --index-url https://download.pytorch.org/whl/cpu \
-    --extra-index-url https://pypi.org/simple \
-    torch torchaudio
-RUN tts --model_name tts_models/en/ljspeech/vits --text "warmup" --out_path /tmp/w.wav
-CMD ["tts-server", "--model_name", "tts_models/en/ljspeech/vits", "--port", "5002"]
+FROM python:3.10-slim
+
+# Install system dependencies (ffmpeg is mandatory for whisper)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy dependency definition first for layer caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Pre-download the Whisper base model into the image
+# This prevents pods from downloading the model every time they scale up
+RUN python -c "import whisper; whisper.load_model('base')"
+
+# Copy application source code
+COPY server.py .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
